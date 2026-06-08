@@ -1,0 +1,40 @@
+# Python cache and test artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment/config files
+.env
+.env.*
+
+# Build and packaging output
+build/
+dist/
+output/
+*.egg-info/
+
+# Generated app reports
+reports/
+
+# Large local installers and duplicate archives
+python-installer.exe
+questions_nvo/questions_nvo.zip
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+~$*.docx
+~$*.xlsx

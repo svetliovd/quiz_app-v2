@@ -1,0 +1,5 @@
+Pillow
+pandas
+pygame
+reportlab
+openpyxl

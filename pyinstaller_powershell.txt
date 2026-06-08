@@ -1,0 +1,11 @@
+python -m PyInstaller `
+  --name QuizApp `
+  --onefile `
+  --windowed `
+  --add-data "images;images" `
+  --add-data "sounds;sounds" `
+  --add-data "fonts;fonts" `
+  --add-data "questions;questions" `
+  --add-data "grading_scale.csv;." `
+  --add-data "instructions.docx;." `
+  .\main.py
