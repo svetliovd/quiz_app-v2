@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from copy import deepcopy
 
 from config import APP_DIR, SKINS_DIR, TEMPLATES_DIR, resource_path
@@ -28,142 +29,32 @@ TIER_NAMES_BG = {
 }
 
 DEFAULT_COLORS = {
-    "bg": "#1e1e2f",
-    "panel": "#2e2e4f",
-    "text": "#ffffff",
-    "muted": "#cfcfe6",
-    "button": "#3e3e5e",
-    "button_active": "#32bb5b",
-    "button_hover": "#52527a",
-    "accent": "#ffd54f",
-    "success": "#4caf50",
-    "danger": "#f44336",
-    "warning": "#ffeb3b",
-    "link": "#64b5f6",
-    "option_idle": "#3e3e5e",
-    "option_active": "#2e2e4f",
-    "option_correct": "#2e7d32",
-    "option_wrong": "#c62828",
-    "option_neutral": "#424242",
+    "bg": "#12343b",
+    "panel": "#1f5f6a",
+    "text": "#f8fffb",
+    "muted": "#bfe9df",
+    "button": "#246b7a",
+    "button_active": "#ff7a59",
+    "button_hover": "#2f8fa2",
+    "accent": "#ffd166",
+    "success": "#2dd4bf",
+    "danger": "#ef476f",
+    "warning": "#ffe066",
+    "link": "#7dd3fc",
+    "option_idle": "#246b7a",
+    "option_active": "#184a58",
+    "option_correct": "#0f9f7a",
+    "option_wrong": "#c92a52",
+    "option_neutral": "#43525c",
 }
 
 BUILTIN_SKINS = [
     {
         "id": "classic",
-        "name": "Classic Focus",
-        "description": "The original calm quiz look.",
+        "name": "Fresh Focus",
+        "description": "The default vivid quiz look.",
         "unlock": {},
         "colors": DEFAULT_COLORS,
-    },
-    {
-        "id": "candy",
-        "name": "Candy Pop",
-        "description": "Bright, friendly colors for early wins.",
-        "unlock": {"tier": "easy", "total_correct": 30},
-        "colors": {
-            "bg": "#2a1831",
-            "panel": "#3a2445",
-            "text": "#fff7fb",
-            "muted": "#ffd3ea",
-            "button": "#7c3f8f",
-            "button_active": "#ff6fae",
-            "button_hover": "#9652aa",
-            "accent": "#ffe066",
-            "success": "#55d68a",
-            "danger": "#ff5c7a",
-            "warning": "#ffe066",
-            "link": "#8be9ff",
-            "option_idle": "#6f377f",
-            "option_active": "#4b2b58",
-        },
-    },
-    {
-        "id": "blocks",
-        "name": "Block Builder",
-        "description": "Playful block colors for steady progress.",
-        "unlock": {"tier": "easy", "total_correct": 30},
-        "colors": {
-            "bg": "#14251c",
-            "panel": "#1f3a2b",
-            "text": "#f4fff8",
-            "muted": "#b7dfc6",
-            "button": "#2f7049",
-            "button_active": "#e1b12c",
-            "button_hover": "#3d8a5d",
-            "accent": "#f6d365",
-            "success": "#57c84d",
-            "danger": "#d94f3d",
-            "warning": "#ffcf4a",
-            "link": "#7dcfff",
-            "option_idle": "#2f7049",
-            "option_active": "#284b38",
-        },
-    },
-    {
-        "id": "galaxy",
-        "name": "Galaxy Run",
-        "description": "Deep space contrast for stronger scores.",
-        "unlock": {"tier": "medium", "total_correct": 50},
-        "colors": {
-            "bg": "#111827",
-            "panel": "#1f2937",
-            "text": "#f8fafc",
-            "muted": "#cbd5e1",
-            "button": "#374151",
-            "button_active": "#06b6d4",
-            "button_hover": "#4b5563",
-            "accent": "#f59e0b",
-            "success": "#22c55e",
-            "danger": "#ef4444",
-            "warning": "#facc15",
-            "link": "#38bdf8",
-            "option_idle": "#334155",
-            "option_active": "#1e293b",
-        },
-    },
-    {
-        "id": "hero",
-        "name": "Hero Web",
-        "description": "High-energy red and blue for excellent results.",
-        "unlock": {"tier": "medium", "total_correct": 50},
-        "colors": {
-            "bg": "#171923",
-            "panel": "#252b3a",
-            "text": "#ffffff",
-            "muted": "#d7e3ff",
-            "button": "#1d4ed8",
-            "button_active": "#dc2626",
-            "button_hover": "#2563eb",
-            "accent": "#f8fafc",
-            "success": "#16a34a",
-            "danger": "#ef4444",
-            "warning": "#fde047",
-            "link": "#93c5fd",
-            "option_idle": "#1e40af",
-            "option_active": "#253858",
-        },
-    },
-    {
-        "id": "arena",
-        "name": "Arena Neon",
-        "description": "A competitive look for near-perfect runs.",
-        "unlock": {"tier": "hard", "total_correct": 100},
-        "colors": {
-            "bg": "#101114",
-            "panel": "#1f2128",
-            "text": "#f8fafc",
-            "muted": "#cfd7e6",
-            "button": "#3f3f46",
-            "button_active": "#f97316",
-            "button_hover": "#52525b",
-            "accent": "#22d3ee",
-            "success": "#84cc16",
-            "danger": "#ef4444",
-            "warning": "#facc15",
-            "link": "#67e8f9",
-            "option_idle": "#34343b",
-            "option_active": "#22252c",
-        },
     },
 ]
 
@@ -209,20 +100,18 @@ class SkinManager:
     def _load_template_skins(self):
         if not os.path.isdir(TEMPLATES_DIR):
             return
-        templates_by_tier = {tier: [] for tier in UNLOCK_TIERS}
+        tier_counts = {tier: 0 for tier in UNLOCK_TIERS}
         for name in sorted(os.listdir(TEMPLATES_DIR), key=str.lower):
             folder = os.path.join(TEMPLATES_DIR, name)
             if not os.path.isdir(folder):
                 continue
             tier = self._read_template_tier(folder)
-            if tier in templates_by_tier:
-                templates_by_tier[tier].append(folder)
-
-        for tier, folders in templates_by_tier.items():
-            for index, folder in enumerate(folders, start=1):
-                skin_id = self._template_target_skin_id(tier, index)
-                skin = self._skin_from_template(folder, tier, index, skin_id)
-                self._skins[skin_id] = self._normalize_skin(skin)
+            if tier not in UNLOCK_TIERS:
+                continue
+            tier_counts[tier] += 1
+            skin_id = self._template_skin_id(name)
+            skin = self._skin_from_template(folder, tier, tier_counts[tier], skin_id)
+            self._skins[skin_id] = self._normalize_skin(skin)
 
     def _read_template_tier(self, folder):
         candidates = ["tier.txt", "skin.txt", "type.txt", "unlock.txt", "level.txt"]
@@ -248,25 +137,27 @@ class SkinManager:
             return None
         return value if value in UNLOCK_TIERS else None
 
-    def _template_target_skin_id(self, tier, index):
-        tier_ids = [
-            skin["id"]
-            for skin in self.all()
-            if str((skin.get("unlock") or {}).get("tier") or "").lower() == tier
-        ]
-        if index <= len(tier_ids):
-            return tier_ids[index - 1]
-        candidate = f"{tier}_{index:02d}"
-        while candidate in self._skins:
-            index += 1
-            candidate = f"{tier}_{index:02d}"
-        return candidate
+    def _template_skin_id(self, folder_name):
+        skin_id = re.sub(r"[^\w]+", "_", str(folder_name).strip().lower()).strip("_")
+        return skin_id or "template_skin"
+
+    def _template_display_name(self, folder):
+        raw_name = os.path.basename(folder).strip()
+        skin_id = self._template_skin_id(raw_name)
+        name_overrides = {
+            "csgo": "CS:GO",
+            "brawstars": "Brawl Stars",
+        }
+        if skin_id in name_overrides:
+            return name_overrides[skin_id]
+        parts = [part for part in re.split(r"[\s_-]+", raw_name) if part]
+        return " ".join(part.capitalize() for part in parts) or "Template Skin"
 
     def _skin_from_template(self, folder, tier, index, skin_id):
         base = deepcopy(self.get(skin_id)) if skin_id in self._skins else {
             "id": skin_id,
-            "name": f"{TIER_LABELS_BG[tier]} {index}",
-            "description": "Отключва се с добри резултати.",
+            "name": self._template_display_name(folder),
+            "description": f"{TIER_LABELS_BG[tier]} {index}",
             "unlock": {
                 "tier": tier,
                 "total_correct": UNLOCK_TIERS[tier],
@@ -284,20 +175,20 @@ class SkinManager:
         skin.update(
             {
                 "id": skin_id,
-                "name": f"{TIER_LABELS_BG[tier]} {index}",
-                "description": "Отключва се с добри резултати.",
+                "name": base.get("name") or self._template_display_name(folder),
+                "description": base.get("description") or f"{TIER_LABELS_BG[tier]} {index}",
                 "asset_dir": rel_asset_dir,
                 "unlock": unlock,
-                "wallpaper": self._first_template_file(folder, "wallpaper", ("jpg", "jpeg", "png", "gif")),
-                "music": self._first_template_file(folder, "music", ("mp3", "ogg", "wav")),
-                "unlock_sound": self._first_template_file(folder, "unlock_sound", ("mp3", "wav", "ogg")),
-                "select_sound": self._first_template_file(folder, "select_sound", ("mp3", "wav", "ogg")),
-                "correct_sound": self._first_template_file(folder, "correct_sound", ("mp3", "wav", "ogg")),
-                "wrong_sound": self._first_template_file(folder, "wrong_sound", ("mp3", "wav", "ogg")),
-                "success_sound": self._first_template_file(folder, ("success_sound", "win_sound"), ("mp3", "wav", "ogg")),
-                "fail_sound": self._first_template_file(folder, ("fail_sound", "lose_sound"), ("mp3", "wav", "ogg")),
-                "win_image": self._first_template_file(folder, ("win", "success"), ("png", "jpg", "jpeg", "gif")),
-                "fail_image": self._first_template_file(folder, ("fail", "lose"), ("png", "jpg", "jpeg", "gif")),
+                "wallpaper": self._first_template_file(folder, "wallpaper", ("jpg", "jpeg", "png", "gif", "webp")) or base.get("wallpaper"),
+                "music": self._first_template_file(folder, "music", ("mp3", "ogg", "wav")) or self._fallback_template_music(folder) or base.get("music"),
+                "unlock_sound": self._first_template_file(folder, "unlock_sound", ("mp3", "wav", "ogg")) or base.get("unlock_sound"),
+                "select_sound": self._first_template_file(folder, "select_sound", ("mp3", "wav", "ogg")) or base.get("select_sound"),
+                "correct_sound": self._first_template_file(folder, "correct_sound", ("mp3", "wav", "ogg")) or base.get("correct_sound"),
+                "wrong_sound": self._first_template_file(folder, "wrong_sound", ("mp3", "wav", "ogg")) or base.get("wrong_sound"),
+                "success_sound": self._first_template_file(folder, ("success_sound", "win_sound"), ("mp3", "wav", "ogg")) or base.get("success_sound"),
+                "fail_sound": self._first_template_file(folder, ("fail_sound", "lose_sound"), ("mp3", "wav", "ogg")) or base.get("fail_sound"),
+                "win_image": self._first_template_file(folder, ("win", "success"), ("png", "jpg", "jpeg", "gif", "webp")) or base.get("win_image"),
+                "fail_image": self._first_template_file(folder, ("fail", "lose"), ("png", "jpg", "jpeg", "gif", "webp")) or base.get("fail_image"),
             }
         )
         return skin
@@ -310,6 +201,35 @@ class SkinManager:
                 if os.path.exists(os.path.join(folder, filename)):
                     return filename
         return None
+
+    def _fallback_template_music(self, folder):
+        ignored_stems = {
+            "unlock_sound",
+            "select_sound",
+            "correct_sound",
+            "wrong_sound",
+            "success_sound",
+            "win_sound",
+            "fail_sound",
+            "lose_sound",
+        }
+        candidates = []
+        for filename in sorted(os.listdir(folder), key=str.lower):
+            stem, ext = os.path.splitext(filename)
+            if ext.lower().lstrip(".") not in {"mp3", "ogg", "wav"}:
+                continue
+            if stem.lower() in ignored_stems:
+                continue
+            path = os.path.join(folder, filename)
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = 0
+            is_named_music = any(word in filename.lower() for word in ("music", "song", "theme", "loop"))
+            candidates.append((is_named_music, size, filename))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: (item[0], item[1], item[2].lower()))[2]
 
     def _normalize_skin(self, skin):
         skin_id = str(skin.get("id", "")).strip()

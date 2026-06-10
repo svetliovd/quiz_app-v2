@@ -1,7 +1,7 @@
 QuizApp skins
 =============
 
-Built-in skins are defined in skins.py. To add custom local skins, add
+The default skin is defined in skins.py. Additional local skins come from
 standard asset folders under templates.
 
 Quick start:
@@ -10,13 +10,12 @@ Quick start:
 3. Add a text file in the folder, for example tier.txt.
 4. Write exactly one word in that file: easy, medium, or hard.
 
-The app automatically maps template folders to the existing skin slots:
-- first easy folder -> Лесен скин 1
-- second easy folder -> Лесен скин 2
-- first medium folder -> Среден скин 1
-- first hard folder -> Труден скин 1
+The app automatically creates one skin per template folder:
+- templates/minecraft -> skin id "minecraft", name "Minecraft"
+- templates/fortnite -> skin id "fortnite", name "Fortnite"
+- templates/csgo -> skin id "csgo", name "CS:GO"
 
-Folders are processed alphabetically inside each tier.
+Folders are processed alphabetically.
 
 Unlock tiers:
 - easy: 30 total correct answers
@@ -74,7 +73,7 @@ templates/my_theme/music.mp3
 Standard automatic filenames:
 - tier.txt: contains easy, medium, or hard
 - wallpaper.jpg or wallpaper.png
-- music.mp3
+- music.mp3, or another music-like MP3/OGG/WAV file as a fallback
 - unlock_sound.mp3
 - select_sound.mp3
 - correct_sound.mp3
