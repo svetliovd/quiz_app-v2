@@ -25,6 +25,7 @@ output/
 
 # Generated app reports
 reports/
+profiles/
 
 # Large local installers and duplicate archives
 python-installer.exe

@@ -1,0 +1,45 @@
+{
+  "skins": [
+    {
+      "id": "example_theme",
+      "name": "Example Theme",
+      "description": "Short text shown in the skin chooser.",
+      "asset_dir": "templates/example_theme",
+      "unlock": {
+        "tier": "easy",
+        "total_correct": 30,
+        "demo_total_correct": 1
+      },
+      "wallpaper": "wallpaper.png",
+      "music": "music.mp3",
+      "unlock_sound": "unlock.mp3",
+      "select_sound": "select.wav",
+      "correct_sound": "correct.wav",
+      "wrong_sound": "wrong.wav",
+      "success_sound": "success.mp3",
+      "fail_sound": "fail.mp3",
+      "win_image": "win.png",
+      "fail_image": "fail.png",
+      "font_family": "Arial",
+      "colors": {
+        "bg": "#101114",
+        "panel": "#1f2128",
+        "text": "#ffffff",
+        "muted": "#cfd7e6",
+        "button": "#3f3f46",
+        "button_active": "#f97316",
+        "button_hover": "#52525b",
+        "accent": "#22d3ee",
+        "success": "#84cc16",
+        "danger": "#ef4444",
+        "warning": "#facc15",
+        "link": "#67e8f9",
+        "option_idle": "#34343b",
+        "option_active": "#22252c",
+        "option_correct": "#2e7d32",
+        "option_wrong": "#c62828",
+        "option_neutral": "#424242"
+      }
+    }
+  ]
+}

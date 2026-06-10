@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('images', 'images'), ('sounds', 'sounds'), ('fonts', 'fonts'), ('questions', 'questions'), ('grading_scale.csv', '.'), ('instructions.docx', '.')],
+    datas=[('images', 'images'), ('sounds', 'sounds'), ('fonts', 'fonts'), ('skins', 'skins'), ('templates', 'templates'), ('questions', 'questions'), ('grading_scale.csv', '.'), ('instructions.txt', '.'), ('instructions.docx', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

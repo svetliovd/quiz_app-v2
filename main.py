@@ -13,8 +13,15 @@ from pathlib import Path
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
+from achievements import (
+    PROFILE_EXTENSION,
+    create_profile,
+    load_profile,
+    save_profile,
+    update_profile_after_result,
+)
 from answer_utils import normalize_answer as _normalize_answer
-from audio import play_sound
+from audio import play_music, play_sound, stop_music
 from config import (
     ADMIN_PASSWORD,
     APP_DIR,
@@ -31,10 +38,13 @@ from config import (
     IMAGES_DIR,
     LETTER_MAP_EN_TO_BG,
     LINKS,
+    PROFILES_DIR,
     QUESTIONS_DIR,
     REPORTS_DIR,
+    SKINS_DIR,
     SOUNDS_DIR,
     SUCCESS_SOUND,
+    TEMPLATES_DIR,
     WRONG_SOUND,
     resource_path,
 )
@@ -45,6 +55,7 @@ from info_windows import open_instructions_window, open_team_window
 from pdf_report import build_pdf_report
 from question_store import delete_question_csvs, ensure_question_folder, load_question_records, store_excel_questions
 from radio_player import open_radio_player
+from skins import DEFAULT_COLORS, DEFAULT_SKIN_ID, SkinManager
 
 grading_df = load_grading_scale(GRADING_FILE)
 
@@ -53,7 +64,15 @@ class QuizApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Quiz система")
-        self.root.configure(bg="#1e1e2f")
+        self.skin_manager = SkinManager(SKINS_DIR)
+        self.student_profile = create_profile()
+        self.active_skin = self.skin_manager.get(DEFAULT_SKIN_ID)
+        self._wallpaper_label = None
+        self._wallpaper_photo = None
+        self._skin_music_path = None
+        self.admin_demo_unlocks = False
+        self.quiz_skin_id = DEFAULT_SKIN_ID
+        self.root.configure(bg=self._theme_color("bg"))
         self.root.geometry("900x650")
 
         self.subject = None
@@ -92,6 +111,166 @@ class QuizApp:
                 w.destroy()
             except Exception:
                 pass
+        self.root.configure(bg=self._theme_color("bg"))
+        self._wallpaper_label = None
+        self._wallpaper_photo = None
+        self._refresh_wallpaper()
+
+    def _theme_color(self, key, fallback=None):
+        colors = (getattr(self, "active_skin", None) or {}).get("colors") or DEFAULT_COLORS
+        return colors.get(key, DEFAULT_COLORS.get(key, fallback))
+
+    def _theme_font(self):
+        return (getattr(self, "active_skin", None) or {}).get("font_family") or "Arial"
+
+    def _profile_short_key(self):
+        return str(self.student_profile.get("student_key", ""))[:8].upper()
+
+    def _profile_summary_text(self):
+        unlocked = len(self.student_profile.get("unlocked_skins") or [])
+        total = len(self.skin_manager.all())
+        total_correct = int(self.student_profile.get("total_correct") or 0)
+        return f"Профил: {self._profile_short_key()} | Верни общо: {total_correct} | Скинове: {unlocked}/{total}"
+
+    def _refresh_wallpaper(self):
+        try:
+            if self._wallpaper_label:
+                self._wallpaper_label.destroy()
+        except Exception:
+            pass
+        self._wallpaper_label = None
+        self._wallpaper_photo = None
+
+        wallpaper_path = self.skin_manager.asset_path(self.active_skin, "wallpaper")
+        if not wallpaper_path:
+            return
+        try:
+            self.root.update_idletasks()
+            width = max(900, self.root.winfo_width() or self.root.winfo_screenwidth())
+            height = max(650, self.root.winfo_height() or self.root.winfo_screenheight())
+            img = Image.open(wallpaper_path)
+            img_w, img_h = img.size
+            if img_w > 0 and img_h > 0:
+                scale = max(width / img_w, height / img_h)
+                new_size = (max(1, int(img_w * scale)), max(1, int(img_h * scale)))
+                img = img.resize(new_size, Image.LANCZOS)
+                left = max(0, (img.size[0] - width) // 2)
+                top = max(0, (img.size[1] - height) // 2)
+                img = img.crop((left, top, left + width, top + height))
+            self._wallpaper_photo = ImageTk.PhotoImage(img)
+            self._wallpaper_label = tk.Label(self.root, image=self._wallpaper_photo, bg=self._theme_color("bg"))
+            self._wallpaper_label.place(x=0, y=0, relwidth=1, relheight=1)
+            self._wallpaper_label.lower()
+        except Exception:
+            self._wallpaper_label = None
+            self._wallpaper_photo = None
+
+    def _apply_skin_music(self):
+        music_path = self.skin_manager.asset_path(self.active_skin, "music")
+        if not music_path:
+            if self._skin_music_path:
+                stop_music()
+                self._skin_music_path = None
+            return
+        if music_path != self._skin_music_path:
+            stop_music()
+            play_music(music_path, loop=True)
+            self._skin_music_path = music_path
+
+    def _play_skin_sound(self, field, fallback_path=None):
+        play_sound(self.skin_manager.asset_path(self.active_skin, field) or fallback_path)
+
+    def _set_active_skin(self, skin_id, *, play_select_sound=False, allow_locked=False, persist=True):
+        unlocked = set(self.student_profile.get("unlocked_skins") or [DEFAULT_SKIN_ID])
+        target_id = skin_id if (allow_locked or skin_id in unlocked) else DEFAULT_SKIN_ID
+        skin = self.skin_manager.get(target_id)
+        self.active_skin = skin
+        if persist and skin["id"] in unlocked:
+            self.student_profile["selected_skin"] = skin["id"]
+        if play_select_sound:
+            play_sound(self.skin_manager.asset_path(skin, "select_sound"))
+        self.root.configure(bg=self._theme_color("bg"))
+        self._refresh_wallpaper()
+        self._apply_theme()
+        self._apply_skin_music()
+
+    def _mapped_theme_color(self, value):
+        if not value:
+            return value
+        color_map = {
+            "#1e1e2f": self._theme_color("bg"),
+            "#2e2e4f": self._theme_color("panel"),
+            BTN_BG: self._theme_color("button"),
+            BTN_BG_ACTIVE: self._theme_color("button_active"),
+            "#52527a": self._theme_color("button_hover"),
+            "#525280": self._theme_color("button_hover"),
+            "#3bd66a": self._theme_color("button_active"),
+            "#3ea96e": self._theme_color("button_active"),
+            "#4caf50": self._theme_color("success"),
+            "#2e7d32": self._theme_color("option_correct"),
+            "#f44336": self._theme_color("danger"),
+            "#c62828": self._theme_color("option_wrong"),
+            "#424242": self._theme_color("option_neutral"),
+            "#8e3e3e": self._theme_color("danger"),
+            "#a85a5a": self._theme_color("danger"),
+            "#ff7f7f": self._theme_color("danger"),
+            "#cfcfe6": self._theme_color("muted"),
+            "#f4f6ff": self._theme_color("text"),
+            "#d9d9ee": self._theme_color("muted"),
+            "white": self._theme_color("text"),
+            "yellow": self._theme_color("warning"),
+            "lightgreen": self._theme_color("success"),
+            "tomato": self._theme_color("danger"),
+            "blue": self._theme_color("link"),
+        }
+        value = str(value)
+        if value in color_map:
+            return color_map[value]
+        for skin in self.skin_manager.all():
+            for key, color in (skin.get("colors") or {}).items():
+                if value == color and key in DEFAULT_COLORS:
+                    return self._theme_color(key)
+        return value
+
+    def _apply_theme(self):
+        try:
+            self.root.configure(bg=self._theme_color("bg"))
+        except Exception:
+            pass
+        self._apply_theme_to_widget(self.root)
+
+    def _apply_theme_to_widget(self, widget):
+        if getattr(widget, "_preserve_theme_colors", False):
+            return
+        for option in ("bg", "background", "fg", "foreground", "activebackground", "activeforeground", "selectcolor", "disabledforeground"):
+            try:
+                current = widget.cget(option)
+            except Exception:
+                continue
+            mapped = self._mapped_theme_color(current)
+            if mapped != current:
+                try:
+                    widget.configure(**{option: mapped})
+                except Exception:
+                    pass
+        try:
+            font_value = widget.cget("font")
+        except Exception:
+            font_value = None
+        if font_value and not getattr(widget, "_skip_zoom", False):
+            try:
+                font = tkfont.Font(font=font_value)
+                family = self._theme_font()
+                if family:
+                    widget.configure(font=(family, font.cget("size"), font.cget("weight"), font.cget("slant")))
+                    if hasattr(widget, "_base_font_config"):
+                        widget._base_font_config["family"] = family
+            except Exception:
+                pass
+        for child in widget.winfo_children():
+            if child is getattr(self, "_wallpaper_label", None):
+                continue
+            self._apply_theme_to_widget(child)
 
     def _ensure_q_folder(self, subject: str, grade: str) -> Path:
         return ensure_question_folder(subject or self.subject or "БЕЛ", grade or self.category or "Импорт от Excel")
@@ -241,14 +420,16 @@ class QuizApp:
 
     def _button_hover_color(self, bg):
         colors = {
-            BTN_BG: "#52527a",
-            BTN_BG_ACTIVE: "#3bd66a",
-            "#8e3e3e": "#a94f4f",
-            "#2e7d32": "#3a9840",
-            "#c62828": "#df3434",
-            "#424242": "#555555",
+            BTN_BG: self._theme_color("button_hover"),
+            self._theme_color("button"): self._theme_color("button_hover"),
+            BTN_BG_ACTIVE: self._theme_color("button_active"),
+            self._theme_color("button_active"): self._theme_color("button_hover"),
+            "#8e3e3e": self._theme_color("danger"),
+            "#2e7d32": self._theme_color("option_correct"),
+            "#c62828": self._theme_color("option_wrong"),
+            "#424242": self._theme_color("option_neutral"),
         }
-        return colors.get(bg, "#52527a")
+        return colors.get(bg, self._theme_color("button_hover"))
 
     def _on_button_enter(self, event=None):
         widget = event.widget if event else None
@@ -273,6 +454,7 @@ class QuizApp:
 
     def exit_kiosk(self):
         # Stop any playing radio first
+        stop_music()
         if self.ffplay_process:
             try:
                 self.ffplay_process.terminate()
@@ -340,7 +522,9 @@ class QuizApp:
             self._radio_btn.place(relx=0, rely=1.0, x=12, y=-12, anchor="sw")
         else:
             self._radio_btn.place(relx=0, x=12, y=12, anchor="nw")
+        self._apply_theme()
         self._apply_zoom()
+        self._apply_skin_music()
 
     def _ask_admin_password(self, title="Администратор", prompt="Въведете администраторска парола:", width_px=520):
         dlg = tk.Toplevel(self.root)
@@ -471,19 +655,35 @@ class QuizApp:
         self.timer_running = False
         self.timer_seconds = 0
         self.timer_label = None
+        self.admin_demo_unlocks = False
+        self._set_active_skin(self.student_profile.get("selected_skin", DEFAULT_SKIN_ID), persist=False)
         self._clear_screen()
         tk.Label(self.root, text="Изберете профил", font=("Arial", 28, "bold"), fg="white", bg="#1e1e2f").pack(pady=30)
+        tk.Label(self.root, text=self._profile_summary_text(), font=("Arial", 13), fg="#cfcfe6", bg="#1e1e2f").pack(pady=(0, 12))
         tk.Button(self.root, text="Ученик", font=("Arial", 20), width=25,
                   bg=BTN_BG, fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
                   command=self._enter_student_mode).pack(pady=15)
         tk.Button(self.root, text="Администратор", font=("Arial", 20), width=25,
                   bg=BTN_BG, fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
                   command=self._admin_login).pack(pady=15)
+        profile_tools = tk.Frame(self.root, bg="#1e1e2f")
+        profile_tools.pack(pady=(12, 4))
+        tk.Button(profile_tools, text="Импорт профил", font=("Arial", 13), width=16,
+                  bg=BTN_BG, fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
+                  command=self.import_profile).pack(side="left", padx=4)
+        tk.Button(profile_tools, text="Експорт профил", font=("Arial", 13), width=16,
+                  bg=BTN_BG, fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
+                  command=self.export_profile).pack(side="left", padx=4)
+        tk.Button(profile_tools, text="Нов профил", font=("Arial", 13), width=14,
+                  bg=BTN_BG, fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
+                  command=self._new_student_profile).pack(side="left", padx=4)
         self.create_footer()
         self._add_exit_button()
 
     def _enter_student_mode(self):
         self.is_admin = False
+        self.admin_demo_unlocks = False
+        self._set_active_skin(self.student_profile.get("selected_skin", DEFAULT_SKIN_ID), persist=False)
         self.create_subject_screen()
 
     def _admin_login(self):
@@ -492,9 +692,210 @@ class QuizApp:
             return
         if pwd == ADMIN_PASSWORD:
             self.is_admin = True
+            self.admin_demo_unlocks = False
             self.create_subject_screen()
         else:
             messagebox.showerror("Грешна парола", "Невалидна администраторска парола.")
+
+    def _new_student_profile(self):
+        if not messagebox.askyesno("Нов профил", "Да се започне ли с нов ученически профил?"):
+            return
+        self.student_profile = create_profile()
+        self._set_active_skin(DEFAULT_SKIN_ID)
+        self.create_start_screen()
+
+    def import_profile(self):
+        os.makedirs(PROFILES_DIR, exist_ok=True)
+        path = filedialog.askopenfilename(
+            title="Импорт на ученически профил",
+            filetypes=[("Quiz профил", f"*{PROFILE_EXTENSION}"), ("JSON файлове", "*.json"), ("Всички файлове", "*.*")],
+            initialdir=PROFILES_DIR,
+        )
+        if not path:
+            return
+        try:
+            profile = load_profile(path)
+        except Exception as exc:
+            messagebox.showerror("Грешка", f"Профилът не може да бъде зареден.\n{exc}")
+            return
+        known_ids = set(self.skin_manager.ids())
+        profile["unlocked_skins"] = [skin_id for skin_id in profile.get("unlocked_skins", []) if skin_id in known_ids]
+        if DEFAULT_SKIN_ID not in profile["unlocked_skins"]:
+            profile["unlocked_skins"].insert(0, DEFAULT_SKIN_ID)
+        if profile.get("selected_skin") not in profile["unlocked_skins"]:
+            profile["selected_skin"] = DEFAULT_SKIN_ID
+        self.student_profile = profile
+        self._set_active_skin(profile.get("selected_skin", DEFAULT_SKIN_ID))
+        messagebox.showinfo("Готово", f"Профилът е зареден.\nКлюч: {self._profile_short_key()}")
+        self.create_start_screen()
+
+    def export_profile(self):
+        os.makedirs(PROFILES_DIR, exist_ok=True)
+        initial = f"quiz_profile_{self._profile_short_key()}{PROFILE_EXTENSION}"
+        path = filedialog.asksaveasfilename(
+            title="Експорт на ученически профил",
+            defaultextension=PROFILE_EXTENSION,
+            initialfile=initial,
+            initialdir=PROFILES_DIR,
+            filetypes=[("Quiz профил", f"*{PROFILE_EXTENSION}"), ("JSON файлове", "*.json"), ("Всички файлове", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            save_profile(self.student_profile, path)
+        except Exception as exc:
+            messagebox.showerror("Грешка", f"Профилът не може да бъде записан.\n{exc}")
+            return
+        messagebox.showinfo("Готово", f"Профилът е записан тук:\n{path}")
+
+    def open_skin_window(self):
+        unlocked = set(self.student_profile.get("unlocked_skins") or [DEFAULT_SKIN_ID])
+        admin_preview = bool(self.is_admin)
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Преглед на скинове" if admin_preview else "Скинове")
+        dlg.configure(bg=self._theme_color("bg"))
+        dlg.geometry("760x620")
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        tk.Label(
+            dlg,
+            text="Преглед на скинове" if admin_preview else "Избери скин",
+            font=(self._theme_font(), 20, "bold"),
+            fg=self._theme_color("text"),
+            bg=self._theme_color("bg"),
+        ).pack(pady=(18, 8))
+
+        summary_text = (
+            "Админ режим: всички скинове са достъпни само за преглед."
+            if admin_preview
+            else self._profile_summary_text()
+        )
+        tk.Label(
+            dlg,
+            text=summary_text,
+            font=(self._theme_font(), 11),
+            fg=self._theme_color("muted"),
+            bg=self._theme_color("bg"),
+        ).pack(pady=(0, 12))
+
+        selected_var = tk.StringVar(value=self.active_skin.get("id") if admin_preview else self.student_profile.get("selected_skin", DEFAULT_SKIN_ID))
+
+        list_outer = tk.Frame(dlg, bg=self._theme_color("bg"))
+        list_outer.pack(fill="both", expand=True, padx=18)
+        list_canvas = tk.Canvas(list_outer, bg=self._theme_color("bg"), highlightthickness=0)
+        list_scrollbar = tk.Scrollbar(list_outer, orient="vertical", command=list_canvas.yview)
+        list_frame = tk.Frame(list_canvas, bg=self._theme_color("bg"))
+        list_window = list_canvas.create_window((0, 0), window=list_frame, anchor="nw")
+        list_canvas.configure(yscrollcommand=list_scrollbar.set)
+        list_canvas.pack(side="left", fill="both", expand=True)
+        list_scrollbar.pack(side="right", fill="y")
+        list_frame.bind("<Configure>", lambda event: list_canvas.configure(scrollregion=list_canvas.bbox("all")))
+        list_canvas.bind("<Configure>", lambda event: list_canvas.itemconfigure(list_window, width=event.width))
+
+        def preview_skin(skin_id):
+            selected_var.set(skin_id)
+            self._set_active_skin(
+                skin_id,
+                play_select_sound=True,
+                allow_locked=True,
+                persist=False,
+            )
+            self._apply_theme_to_widget(dlg)
+
+        for skin in self.skin_manager.all():
+            is_unlocked = admin_preview or skin["id"] in unlocked
+            real_unlocked = skin["id"] in unlocked
+            colors = skin.get("colors") or DEFAULT_COLORS
+            row = tk.Frame(list_frame, bg=self._theme_color("panel"), padx=10, pady=8)
+            row.pack(fill="x", pady=5)
+
+            swatch = tk.Canvas(row, width=78, height=30, highlightthickness=0, bg=colors.get("bg", self._theme_color("bg")))
+            swatch._preserve_theme_colors = True
+            swatch.create_rectangle(0, 0, 26, 30, fill=colors.get("button", "#444"), outline="")
+            swatch.create_rectangle(26, 0, 52, 30, fill=colors.get("button_active", "#777"), outline="")
+            swatch.create_rectangle(52, 0, 78, 30, fill=colors.get("accent", "#aaa"), outline="")
+            swatch.pack(side="left", padx=(0, 10))
+
+            label_text = skin["name"]
+            detail = skin.get("description") or ""
+            if admin_preview and not real_unlocked:
+                detail = f"Админ преглед: {self.skin_manager.requirement_label(skin)}"
+            elif not is_unlocked:
+                detail = f"Заключен: {self.skin_manager.requirement_label(skin)}"
+            rb = tk.Radiobutton(
+                row,
+                text=f"{label_text}\n{detail}",
+                variable=selected_var,
+                value=skin["id"],
+                indicatoron=0,
+                anchor="w",
+                justify="left",
+                width=38,
+                state=("normal" if is_unlocked else "disabled"),
+                font=(self._theme_font(), 12, "bold"),
+                bg=self._theme_color("button" if is_unlocked else "panel"),
+                fg=self._theme_color("text" if is_unlocked else "muted"),
+                activebackground=self._theme_color("button_hover"),
+                activeforeground=self._theme_color("text"),
+                selectcolor=self._theme_color("button_active"),
+                disabledforeground=self._theme_color("muted"),
+                relief="ridge",
+                bd=2,
+                padx=8,
+                pady=5,
+                command=(lambda sid=skin["id"]: preview_skin(sid)) if admin_preview else None,
+            )
+            rb.pack(side="left", fill="x", expand=True)
+            if admin_preview:
+                tk.Button(
+                    row,
+                    text="Преглед",
+                    font=(self._theme_font(), 11, "bold"),
+                    bg=self._theme_color("button_active"),
+                    fg=self._theme_color("text"),
+                    activebackground=self._theme_color("button_hover"),
+                    command=lambda sid=skin["id"]: preview_skin(sid),
+                    width=10,
+                ).pack(side="left", padx=(10, 0))
+
+        buttons = tk.Frame(dlg, bg=self._theme_color("bg"))
+        buttons.pack(fill="x", padx=18, pady=16)
+
+        def apply_skin():
+            skin_id = selected_var.get()
+            if skin_id not in unlocked and not admin_preview:
+                return
+            self._set_active_skin(
+                skin_id,
+                play_select_sound=True,
+                allow_locked=admin_preview,
+                persist=not admin_preview,
+            )
+            dlg.destroy()
+
+        tk.Button(
+            buttons,
+            text="Прегледай" if admin_preview else "Прилагане",
+            font=(self._theme_font(), 12, "bold"),
+            bg=self._theme_color("button_active"),
+            fg=self._theme_color("text"),
+            activebackground=self._theme_color("button_hover"),
+            command=apply_skin,
+            width=16,
+        ).pack(side="right", padx=(8, 0))
+        tk.Button(
+            buttons,
+            text="Затвори",
+            font=(self._theme_font(), 12),
+            bg=self._theme_color("button"),
+            fg=self._theme_color("text"),
+            activebackground=self._theme_color("button_hover"),
+            command=dlg.destroy,
+            width=16,
+        ).pack(side="right")
+
+        self._apply_theme_to_widget(dlg)
 
     def create_subject_screen(self):
         self.disable_kiosk_for_navigation()
@@ -505,9 +906,24 @@ class QuizApp:
         self.timer_label = None
         self._clear_screen()
         tk.Label(self.root, text="Избери предмет", font=("Arial", 28, "bold"), fg="white", bg="#1e1e2f").pack(pady=30)
+        if not self.is_admin:
+            tk.Label(
+                self.root,
+                text=(
+                    "За да отключиш нови скинове, отговаряй правилно на въпросите от тестовете. "
+                    "30 верни отговора - лесен скин, 50 - средна трудност, 100 - висока трудност"
+                ),
+                font=("Arial", 11),
+                fg="#cfcfe6",
+                bg="#1e1e2f",
+                wraplength=max(520, self.root.winfo_width() - 160),
+                justify="center",
+            ).pack(pady=(0, 14), padx=40)
         wrap = tk.Frame(self.root, bg="#1e1e2f")
         wrap.pack()
         def select_subject(subj):
+            if self.subject != subj:
+                self.selected_category = None
             self.selected_subject = subj
             self.subject = subj
             for btn, val in btns:
@@ -521,6 +937,14 @@ class QuizApp:
                           command=lambda s=subj: select_subject(s))
             b.pack(pady=15)
             btns.append((b, subj))
+        if self.is_admin:
+            tk.Button(self.root, text="Преглед на всички скинове", font=("Arial", 14),
+                      bg=BTN_BG, fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
+                      command=self.open_skin_window).pack(pady=6)
+        else:
+            tk.Button(self.root, text="Разгледай скинове", font=("Arial", 14),
+                      bg=BTN_BG, fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
+                      command=self.open_skin_window).pack(pady=6)
         tk.Button(self.root, text="Смяна на профил", font=("Arial", 14), bg=BTN_BG_ACTIVE, fg=BTN_FG,
                   command=self.create_start_screen).pack(pady=10)
         self.create_footer()
@@ -539,28 +963,56 @@ class QuizApp:
                   command=self.create_subject_screen).pack(pady=10)
         ctr = tk.Frame(self.root, bg="#1e1e2f")
         ctr.pack(pady=10)
-        self.selected_category = None
+        categories = ("НВО 4 клас", "НВО 7 клас", "НВО 10 клас", "НВО 12 клас")
+        if self.selected_category not in categories:
+            self.selected_category = None
         self.sample_size_var.set(20)
         cat_btns = []
+        def style_category_buttons():
+            for btn, val in cat_btns:
+                selected = val == self.selected_category
+                btn.config(
+                    bg=self._theme_color("button_active" if selected else "button"),
+                    fg=self._theme_color("text"),
+                    activebackground=self._theme_color("button_hover"),
+                    relief=("sunken" if selected else "raised"),
+                    bd=(4 if selected else 2),
+                )
         def on_select(cat):
             self.selected_category = cat
-            for btn, val in cat_btns:
-                btn.config(bg=BTN_BG_ACTIVE if val == cat else BTN_BG)
+            style_category_buttons()
             start_btn.config(state="normal")
             spin.config(state="normal")
-        for cat in ("НВО 4 клас", "НВО 7 клас", "НВО 10 клас", "НВО 12 клас"):
+        for cat in categories:
             btn = tk.Button(ctr, text=cat, font=("Arial", 20), width=25,
-                            bg=(BTN_BG_ACTIVE if self.selected_category == cat else BTN_BG),
-                            fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
+                            bg=self._theme_color("button_active" if self.selected_category == cat else "button"),
+                            fg=self._theme_color("text"), activebackground=self._theme_color("button_hover"),
+                            relief=("sunken" if self.selected_category == cat else "raised"),
+                            bd=(4 if self.selected_category == cat else 2),
                             command=lambda c=cat: on_select(c))
             btn.pack(pady=6)
             cat_btns.append((btn, cat))
         opt = tk.Frame(self.root, bg="#1e1e2f")
         opt.pack(pady=10)
         tk.Label(opt, text="Брой въпроси:", font=("Arial", 16), fg="white", bg="#1e1e2f").pack(side=tk.LEFT, padx=(0,8))
-        spin = tk.Spinbox(opt, from_=1, to=999, width=5, font=("Arial", 16), textvariable=self.sample_size_var, state="disabled")
+        spin = tk.Spinbox(opt, from_=1, to=999, width=5, font=("Arial", 16), textvariable=self.sample_size_var,
+                          state=("normal" if self.selected_category else "disabled"))
         spin.pack(side=tk.LEFT)
         if self.is_admin:
+            admin_tools = tk.Frame(self.root, bg="#1e1e2f")
+            admin_tools.pack(pady=(4, 8))
+            tk.Button(admin_tools, text="Преглед на всички скинове", font=("Arial", 14),
+                      bg=BTN_BG, fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
+                      command=self.open_skin_window).pack(side="left", padx=5)
+            demo_var = tk.BooleanVar(value=self.admin_demo_unlocks)
+            def set_demo_unlocks():
+                self.admin_demo_unlocks = bool(demo_var.get())
+            tk.Checkbutton(admin_tools, text="Демо отключване (1/2/3 верни)", variable=demo_var,
+                           command=set_demo_unlocks, indicatoron=0, font=("Arial", 14),
+                           bg=(BTN_BG_ACTIVE if self.admin_demo_unlocks else BTN_BG),
+                           fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
+                           activeforeground=BTN_FG, selectcolor=BTN_BG_ACTIVE,
+                           padx=10, pady=3).pack(side="left", padx=5)
             tk.Button(self.root, text="Импорт на въпроси (Excel)", font=("Arial", 16),
                       bg=BTN_BG, fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
                       command=self.import_questions_excel).pack(pady=10)
@@ -571,7 +1023,7 @@ class QuizApp:
                       bg=BTN_BG, fg=BTN_FG, activebackground=BTN_BG_ACTIVE,
                       command=self.import_grading_scale_csv).pack(pady=6)
         start_btn = tk.Button(self.root, text="Старт", font=("Arial", 18), bg=BTN_BG_ACTIVE, fg=BTN_FG,
-                              state="disabled",
+                              state=("normal" if self.selected_category else "disabled"),
                               command=lambda: self.load_questions(self.selected_category, sample_size=self.sample_size_var.get()))
         start_btn.pack(pady=8)
         self.create_footer()
@@ -649,6 +1101,8 @@ class QuizApp:
             return
         self.questions = records
         self.in_test = True
+        self.quiz_skin_id = self.active_skin.get("id", DEFAULT_SKIN_ID)
+        self._apply_skin_music()
         self.enable_kiosk()
         self.timer_seconds = timer_seconds
         self.timer_enabled = self.timer_seconds > 0
@@ -868,11 +1322,11 @@ class QuizApp:
             selected_options = []
         if ok:
             self.score += 1
-            play_sound(CORRECT_SOUND)
+            self._play_skin_sound("correct_sound", CORRECT_SOUND)
             msg = "Коректен отговор!"
             color = "#4caf50"
         else:
-            play_sound(WRONG_SOUND)
+            self._play_skin_sound("wrong_sound", WRONG_SOUND)
             msg = "Грешен отговор"
             color = "#f44336"
         # mark options visually
@@ -966,6 +1420,7 @@ class QuizApp:
                                  command=self.next_question)
             next_btn.grid(row=0, column=0, padx=6, pady=4)
             self._current_widgets["next_button"] = next_btn
+        self._apply_theme()
         self._apply_zoom()
 
     def _check_mcq_single(self, q):
@@ -1001,18 +1456,24 @@ class QuizApp:
         else:
             self.end_quiz()
 
-    def _load_happy_image(self):
-        path = HAPPY_PNG
+    def _load_result_image(self, success: bool):
+        skin_field = "win_image" if success else "fail_image"
+        fallback = HAPPY_PNG if success else resource_path(os.path.join("images", "sad.png"))
+        path = self.skin_manager.asset_path(self.active_skin, skin_field) or fallback
         if not os.path.exists(path):
-            rel = os.path.relpath(path, APP_DIR)
-            path = resource_path(rel)
-        if os.path.exists(path):
             try:
-                img = Image.open(path).resize((100, 100))
-                return ImageTk.PhotoImage(img)
+                rel = os.path.relpath(path, APP_DIR)
+                path = resource_path(rel)
             except Exception:
-                return None
-        return None
+                pass
+        if not os.path.exists(path):
+            return None
+        try:
+            img = Image.open(path)
+            img.thumbnail((140, 140), Image.LANCZOS)
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
 
     def open_link_minimized(self, url: str):
         if self.in_test:
@@ -1035,25 +1496,44 @@ class QuizApp:
         self._clear_screen()
         points = (self.score / len(self.questions)) * 100 if self.questions else 0.0
         grade = self.get_grade(points)
+        demo_unlocks = bool(self.is_admin and self.admin_demo_unlocks)
+        updated_profile, new_skin_ids = update_profile_after_result(
+            self.student_profile,
+            subject=self.subject,
+            category=self.category,
+            correct=self.score,
+            total=len(self.questions),
+            points=points,
+            grade=grade,
+            skin_manager=self.skin_manager,
+            demo_unlocks=demo_unlocks,
+        )
+        result_profile = updated_profile
+        if not self.is_admin:
+            self.student_profile = updated_profile
+            result_profile = self.student_profile
+        selected_result_skin = getattr(self, "quiz_skin_id", None) or result_profile.get("selected_skin", DEFAULT_SKIN_ID)
+        if new_skin_ids:
+            self._set_active_skin(selected_result_skin, allow_locked=self.is_admin, persist=False)
+            unlock_sound = self.skin_manager.asset_path(self.active_skin, "unlock_sound")
+            if unlock_sound:
+                play_sound(unlock_sound)
+        else:
+            self._set_active_skin(selected_result_skin, allow_locked=self.is_admin, persist=False)
         if grade >= 3.00:
-            play_sound(SUCCESS_SOUND)
-            photo = self._load_happy_image()
+            self._play_skin_sound("success_sound", SUCCESS_SOUND)
+            photo = self._load_result_image(success=True)
             if photo:
                 lbl = tk.Label(self.root, image=photo, bg="#1e1e2f")
                 lbl.image = photo
                 lbl.pack(pady=10)
         else:
-            play_sound(FAIL_SOUND)
-            sad_path = resource_path(os.path.join("images", "sad.png"))
-            if os.path.exists(sad_path):
-                try:
-                    img = Image.open(sad_path).resize((100, 100))
-                    ph = ImageTk.PhotoImage(img)
-                    lbl = tk.Label(self.root, image=ph, bg="#1e1e2f")
-                    lbl.image = ph
-                    lbl.pack(pady=10)
-                except Exception:
-                    pass
+            self._play_skin_sound("fail_sound", FAIL_SOUND)
+            photo = self._load_result_image(success=False)
+            if photo:
+                lbl = tk.Label(self.root, image=photo, bg="#1e1e2f")
+                lbl.image = photo
+                lbl.pack(pady=10)
         self._add_exit_button()
         tk.Label(self.root, text="Край на теста!", font=("Arial", 28, "bold"), fg="white", bg="#1e1e2f").pack(pady=30)
         tk.Label(self.root, text=f"Твоят резултат: {self.score}/{len(self.questions)}", font=("Arial", 24), fg="yellow", bg="#1e1e2f").pack(pady=10)
@@ -1062,6 +1542,17 @@ class QuizApp:
             tk.Label(self.root, text="Оценка: 2.00 (под минималния праг от 30 точки)", font=("Arial", 20), fg="#ff7f7f", bg="#1e1e2f").pack(pady=5)
         else:
             tk.Label(self.root, text=f"Оценка: {grade:.2f}", font=("Arial", 24), fg="lightgreen", bg="#1e1e2f").pack(pady=20)
+        if self.is_admin:
+            demo_text = "Админ демо отключване: профилът на ученика не е променен." if demo_unlocks else "Админ тест: профилът на ученика не е променен."
+            tk.Label(self.root, text=demo_text, font=("Arial", 14, "bold"),
+                     fg=self._theme_color("muted"), bg="#1e1e2f",
+                     wraplength=max(600, self.root.winfo_width()-100), justify="center").pack(pady=5)
+        if new_skin_ids:
+            skin_names = ", ".join(self.skin_manager.get(skin_id)["name"] for skin_id in new_skin_ids)
+            unlock_prefix = "Демо отключен скин" if self.is_admin else "Нов отключен скин"
+            tk.Label(self.root, text=f"{unlock_prefix}: {skin_names}", font=("Arial", 18, "bold"),
+                     fg=self._theme_color("accent"), bg="#1e1e2f",
+                     wraplength=max(600, self.root.winfo_width()-100), justify="center").pack(pady=8)
         if grade < 6.00:
             tk.Label(self.root, text=(
                 "Тук можеш да намериш дигитални материали, с които да подобриш "
@@ -1073,9 +1564,19 @@ class QuizApp:
                           command=lambda l=link: self.open_link_minimized(l)).pack(pady=10)
         tk.Button(self.root, text="Експорт на отчет (PDF)", font=("Arial", 18), bg=BTN_BG_ACTIVE, fg=BTN_FG,
                   command=lambda: self.export_pdf(points, grade)).pack(pady=10)
+        result_tools = tk.Frame(self.root, bg="#1e1e2f")
+        result_tools.pack(pady=4)
+        if not self.is_admin:
+            tk.Button(result_tools, text="Експорт профил", font=("Arial", 16), bg=BTN_BG, fg=BTN_FG,
+                      activebackground=BTN_BG_ACTIVE, command=self.export_profile).pack(side="left", padx=6)
+        tk.Button(result_tools, text="Скинове", font=("Arial", 16), bg=BTN_BG, fg=BTN_FG,
+                  activebackground=BTN_BG_ACTIVE, command=self.open_skin_window).pack(side="left", padx=6)
         tk.Button(self.root, text="Начало", font=("Arial", 20), bg=BTN_BG, fg=BTN_FG,
                   command=self.create_start_screen).pack(pady=30)
         self.create_footer()
+        self._apply_theme()
+        self._apply_zoom()
+        self._apply_skin_music()
 
     def get_grade(self, points: float) -> float:
         return calculate_grade(points, grading_df)
@@ -1092,6 +1593,8 @@ class QuizApp:
         open_instructions_window(self.root)
 
     def _open_radio_player(self, event=None):
+        stop_music()
+        self._skin_music_path = None
         open_radio_player(self)
 
     def create_footer(self):
@@ -1120,6 +1623,9 @@ if __name__ == "__main__":
     os.makedirs(IMAGES_DIR, exist_ok=True)
     os.makedirs(SOUNDS_DIR, exist_ok=True)
     os.makedirs(FONTS_DIR, exist_ok=True)
+    os.makedirs(SKINS_DIR, exist_ok=True)
+    os.makedirs(TEMPLATES_DIR, exist_ok=True)
+    os.makedirs(PROFILES_DIR, exist_ok=True)
     root = tk.Tk()
     app = QuizApp(root)
     root.mainloop()

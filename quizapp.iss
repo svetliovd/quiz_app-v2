@@ -57,6 +57,9 @@ Name: "setenv"; Description: "Задай системна променлива Q
 ; Създай папки за данни в {app} и дай права за запис на обикновени потребители (ученици).
 Name: "{app}\reports"; Permissions: users-modify; Flags: uninsalwaysuninstall
 Name: "{app}\questions"; Permissions: users-modify; Flags: uninsalwaysuninstall
+Name: "{app}\skins"; Permissions: users-modify; Flags: uninsalwaysuninstall
+Name: "{app}\templates"; Permissions: users-modify; Flags: uninsalwaysuninstall
+Name: "{app}\profiles"; Permissions: users-modify; Flags: uninsalwaysuninstall
 ; Ако искаш и images/sounds/fonts да са записваеми (примерно за смяна на ресурси), разкоментирай:
 ; Name: "{app}\images";   Permissions: users-modify
 ; Name: "{app}\sounds";   Permissions: users-modify
@@ -76,6 +79,7 @@ Source: "{#DistDir}\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 ; ONEFILE (остават и другите Source редове)
 Source: "grading_scale.csv"; DestDir: "{app}"; Flags: ignoreversion
+Source: "instructions.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "instructions.docx"; DestDir: "{app}"; Flags: ignoreversion
 
 ; ONEDIR (ако ползваш целия dist/QuizApp, добави също този ред извън onedir блока)
@@ -95,6 +99,8 @@ Source: "{#DistDir}\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "images\*";   DestDir: "{app}\images";   Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "sounds\*";   DestDir: "{app}\sounds";   Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "fonts\*";    DestDir: "{app}\fonts";    Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "skins\*";    DestDir: "{app}\skins";    Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "templates\*"; DestDir: "{app}\templates"; Flags: recursesubdirs createallsubdirs ignoreversion
 ; по желание начален пул въпроси:
 Source: "questions\*"; DestDir: "{app}\questions"; Flags: recursesubdirs createallsubdirs ignoreversion
 
