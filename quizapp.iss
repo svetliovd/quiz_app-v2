@@ -1,162 +1,106 @@
-
 ; =============== QuizApp.iss ===============
-; Inno Setup Script for QuizApp (Windows)
-; Работи с PyInstaller билд: --onefile ИЛИ --onedir
-; Автор: ППМГ проект (Светослав Иванов)
-; ------------------------------------------
+; Inno Setup script for the packaged QuizApp build.
+; Build flow:
+;   1. Run install.bat to create dist\QuizApp.exe with PyInstaller.
+;   2. Compile this script with Inno Setup, or let install.bat run ISCC.exe.
 
 #define AppName        "QuizApp"
-#define AppVersion     "1.0.3"
+#define AppVersion     "1.0.4"
 #define AppPublisher   "PPMG Ekarh Antim I"
 #define AppURL         "https://pmg-vd.org"
 #define ExeName        "QuizApp.exe"
-
-; Път до твоя PyInstaller dist (съотнеси към .iss файла или ползвай абсолютен път)
 #define DistDir        "dist"
 
 [Setup]
-AppId={{C1C0C7C2-17A9-4D9D-8ADE-QUIZ-APP-EXAMPLE-ID}}
+AppId={{6E1C4A95-5C68-4B28-A6B7-D37D7D5B4F2C}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
 AppUpdatesURL={#AppURL}
-
 DefaultDirName={pf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableDirPage=no
 DisableProgramGroupPage=yes
-
-; 64-bit инсталация в Program Files (x64), ако ОС е x64
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin
-
-; Икона на инсталатора (по желание):
-; SetupIconFile=images\logo.ico
-
 Compression=lzma2
 SolidCompression=yes
 UninstallDisplayIcon={app}\{#ExeName}
 OutputDir=output
 OutputBaseFilename=Setup_{#AppName}_{#AppVersion}
-
-; Ако задаваме системна променлива на средата (ENV),
-; това ще прати уведомление към системата след инсталация/деинсталация:
 ChangesEnvironment=yes
+WizardStyle=modern
 
 [Languages]
 Name: "bulgarian"; MessagesFile: "compiler:Languages\Bulgarian.isl"
-Name: "english";  MessagesFile: "compiler:Default.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Създай икона на работния плот"; GroupDescription: "Икони:"; Flags: unchecked
-Name: "setenv"; Description: "Задай системна променлива QUIZ_ADMIN_PASS (админ парола) по време на инсталацията"; GroupDescription: "Допълнителни настройки:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
+Name: "setenv"; Description: "Set the system QUIZ_ADMIN_PASS environment variable"; GroupDescription: "Optional settings:"; Flags: unchecked
 
 [Dirs]
-; Създай папки за данни в {app} и дай права за запис на обикновени потребители (ученици).
 Name: "{app}\reports"; Permissions: users-modify; Flags: uninsalwaysuninstall
 Name: "{app}\questions"; Permissions: users-modify; Flags: uninsalwaysuninstall
 Name: "{app}\skins"; Permissions: users-modify; Flags: uninsalwaysuninstall
 Name: "{app}\templates"; Permissions: users-modify; Flags: uninsalwaysuninstall
 Name: "{app}\profiles"; Permissions: users-modify; Flags: uninsalwaysuninstall
-; Ако искаш и images/sounds/fonts да са записваеми (примерно за смяна на ресурси), разкоментирай:
-; Name: "{app}\images";   Permissions: users-modify
-; Name: "{app}\sounds";   Permissions: users-modify
-; Name: "{app}\fonts";    Permissions: users-modify
 
 [Files]
-; ---------------------- ONEFILE (PyInstaller --onefile) ----------------------
-; Активирай следния ред, ако използваш --onefile билд:
 Source: "{#DistDir}\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
-
-; Ако имаш начални въпроси за импорт (seed pool), можеш да ги копираш в {app}\questions:
-; Source: "questions\*"; DestDir: "{app}\questions"; Flags: recursesubdirs createallsubdirs ignoreversion
-
-; ---------------------- ONEDIR (PyInstaller --onedir) -----------------------
-; АКО използваш --onedir билд, коментирай горното ONEFILE и активирай този блок:
-; Source: "{#DistDir}\{#AppName}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
-
-; ONEFILE (остават и другите Source редове)
 Source: "grading_scale.csv"; DestDir: "{app}"; Flags: ignoreversion
-Source: "instructions.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "instructions.docx"; DestDir: "{app}"; Flags: ignoreversion
-
-; ONEDIR (ако ползваш целия dist/QuizApp, добави също този ред извън onedir блока)
-; Source: "grading_scale.csv"; DestDir: "{app}"; Flags: ignoreversion
+Source: "instructions.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "instructions.docx"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "images\*"; DestDir: "{app}\images"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "sounds\*"; DestDir: "{app}\sounds"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "fonts\*"; DestDir: "{app}\fonts"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "skins\*"; DestDir: "{app}\skins"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "templates\*"; DestDir: "{app}\templates"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "questions\*"; DestDir: "{app}\questions"; Flags: recursesubdirs createallsubdirs ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#ExeName}"; WorkingDir: "{app}"
-Name: "{group}\Деинсталирай {#AppName}"; Filename: "{uninstallexe}"
+Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#ExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
-
-[Files]
-; onefile: копираме .exe
-Source: "{#DistDir}\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
-
-; добавяме ресурсни директории (seed) от проекта:
-Source: "images\*";   DestDir: "{app}\images";   Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "sounds\*";   DestDir: "{app}\sounds";   Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "fonts\*";    DestDir: "{app}\fonts";    Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "skins\*";    DestDir: "{app}\skins";    Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "templates\*"; DestDir: "{app}\templates"; Flags: recursesubdirs createallsubdirs ignoreversion
-; по желание начален пул въпроси:
-Source: "questions\*"; DestDir: "{app}\questions"; Flags: recursesubdirs createallsubdirs ignoreversion
-
-
 [Run]
-; Предложи стартиране на приложението след инсталиране
-Filename: "{app}\{#ExeName}"; Description: "Стартирай {#AppName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifdoesntexist
+Filename: "{app}\{#ExeName}"; Description: "Launch {#AppName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent skipifdoesntexist
 
 [Registry]
-; По желание: задаване на системна ENV променлива QUIZ_ADMIN_PASS от инсталатора (ако е избрано Tasks:setenv)
-; Използваме стойността, върната от функцията {code:GetAdminPass}
-; ВНИМАНИЕ: това влиза в системния регистър (HKLM) - препоръчва се за училищни машини.
-Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
-    ValueType: expandsz; ValueName: "QUIZ_ADMIN_PASS"; ValueData: "{code:GetAdminPass}"; Flags: uninsdeletevalue; Tasks: setenv
+Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; ValueType: expandsz; ValueName: "QUIZ_ADMIN_PASS"; ValueData: "{code:GetAdminPass}"; Flags: uninsdeletevalue; Tasks: setenv; Check: ShouldWriteAdminPass
 
 [Code]
 var
   EnvPage: TInputQueryWizardPage;
 
-function IsTaskSelected(const TaskName: String): Boolean;
-begin
-  Result := WizardIsTaskSelected(TaskName);
-end;
-
 function GetAdminPass(Value: string): string;
 begin
   Result := '';
-  if IsTaskSelected('setenv') then
-  begin
-    if Assigned(EnvPage) and (EnvPage.Values[0] <> '') then
-    begin
-      Result := EnvPage.Values[0];
-    end;
-  end;
+  if Assigned(EnvPage) then
+    Result := EnvPage.Values[0];
+end;
+
+function ShouldWriteAdminPass: Boolean;
+begin
+  Result := WizardIsTaskSelected('setenv') and Assigned(EnvPage) and (EnvPage.Values[0] <> '');
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if Assigned(EnvPage) and (PageID = EnvPage.ID) and (not WizardIsTaskSelected('setenv')) then
+    Result := True;
 end;
 
 procedure InitializeWizard;
 begin
-  { Създаваме страница за въвеждане на админ парола, ПАКО И САМО ако е избран task "setenv" }
   EnvPage := CreateInputQueryPage(
     wpSelectTasks,
-    'Администраторска парола (по избор)',
-    'Системна променлива QUIZ_ADMIN_PASS',
-    'Ако желаете инсталаторът да зададе системна променлива QUIZ_ADMIN_PASS (достъпна за всички потребители), ' +
-    'въведете стойността тук. Оставете празно, ако не желаете.'
+    'Administrator password',
+    'QUIZ_ADMIN_PASS environment variable',
+    'Enter a password only if you selected the optional environment-variable task.'
   );
-  EnvPage.Add('&Парола (ще бъде съхранена в системния регистър):', False);
-end;
-
-function NextButtonClick(CurPageID: Integer): Boolean;
-begin
-  Result := True;
-  { Ако е избран task "setenv" и сме на страницата EnvPage – позволи празна стойност, но предупреди }
-  if (CurPageID = EnvPage.ID) and IsTaskSelected('setenv') then
-  begin
-    { Няма задължителен контрол, но може да добавиш проверки тук }
-    Result := True;
-  end;
+  EnvPage.Add('&Password:', True);
 end;

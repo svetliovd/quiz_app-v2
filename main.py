@@ -59,6 +59,10 @@ from skins import DEFAULT_COLORS, DEFAULT_SKIN_ID, SkinManager
 
 grading_df = load_grading_scale(GRADING_FILE)
 
+RESULT_IMAGE_MAX_SIZE = 500
+RESULT_IMAGE_MIN_SIZE = 160
+RESULT_IMAGE_RESERVED_HEIGHT = 500
+
 # ---------- App class ----------
 class QuizApp:
     def __init__(self, root):
@@ -1456,7 +1460,19 @@ class QuizApp:
         else:
             self.end_quiz()
 
-    def _load_result_image(self, success: bool):
+    def _result_image_box_size(self):
+        try:
+            self.root.update_idletasks()
+            width = self.root.winfo_width() or self.root.winfo_screenwidth()
+            height = self.root.winfo_height() or self.root.winfo_screenheight()
+        except Exception:
+            width, height = 900, 650
+        zoom = max(1.0, float(getattr(self, "zoom_factor", 1.0) or 1.0))
+        usable_width = max(RESULT_IMAGE_MIN_SIZE, int(width) - 180)
+        usable_height = max(RESULT_IMAGE_MIN_SIZE, int(height) - int(RESULT_IMAGE_RESERVED_HEIGHT * zoom))
+        return max(RESULT_IMAGE_MIN_SIZE, min(RESULT_IMAGE_MAX_SIZE, usable_width, usable_height))
+
+    def _load_result_image(self, success: bool, max_size=None):
         skin_field = "win_image" if success else "fail_image"
         fallback = HAPPY_PNG if success else resource_path(os.path.join("images", "sad.png"))
         path = self.skin_manager.asset_path(self.active_skin, skin_field) or fallback
@@ -1470,10 +1486,30 @@ class QuizApp:
             return None
         try:
             img = Image.open(path)
-            img.thumbnail((140, 140), Image.LANCZOS)
+            target = max(1, int(max_size or RESULT_IMAGE_MAX_SIZE))
+            w, h = img.size
+            if w > 0 and h > 0:
+                scale = min(target / w, target / h)
+                new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+                if new_size != img.size:
+                    img = img.resize(new_size, Image.LANCZOS)
             return ImageTk.PhotoImage(img)
         except Exception:
             return None
+
+    def _show_result_image(self, photo, box_size):
+        box = tk.Frame(
+            self.root,
+            width=box_size,
+            height=box_size,
+            bg=self._theme_color("bg"),
+        )
+        box.pack(pady=(10, 8))
+        box.pack_propagate(False)
+        lbl = tk.Label(box, image=photo, bg=self._theme_color("bg"))
+        lbl.image = photo
+        lbl.place(relx=0.5, rely=0.5, anchor="center")
+        return lbl
 
     def open_link_minimized(self, url: str):
         if self.in_test:
@@ -1520,20 +1556,17 @@ class QuizApp:
                 play_sound(unlock_sound)
         else:
             self._set_active_skin(selected_result_skin, allow_locked=self.is_admin, persist=False)
+        result_image_box_size = self._result_image_box_size()
         if grade >= 3.00:
             self._play_skin_sound("success_sound", SUCCESS_SOUND)
-            photo = self._load_result_image(success=True)
+            photo = self._load_result_image(success=True, max_size=result_image_box_size)
             if photo:
-                lbl = tk.Label(self.root, image=photo, bg="#1e1e2f")
-                lbl.image = photo
-                lbl.pack(pady=10)
+                self._show_result_image(photo, result_image_box_size)
         else:
             self._play_skin_sound("fail_sound", FAIL_SOUND)
-            photo = self._load_result_image(success=False)
+            photo = self._load_result_image(success=False, max_size=result_image_box_size)
             if photo:
-                lbl = tk.Label(self.root, image=photo, bg="#1e1e2f")
-                lbl.image = photo
-                lbl.pack(pady=10)
+                self._show_result_image(photo, result_image_box_size)
         self._add_exit_button()
         tk.Label(self.root, text="Край на теста!", font=("Arial", 28, "bold"), fg="white", bg="#1e1e2f").pack(pady=30)
         tk.Label(self.root, text=f"Твоят резултат: {self.score}/{len(self.questions)}", font=("Arial", 24), fg="yellow", bg="#1e1e2f").pack(pady=10)
