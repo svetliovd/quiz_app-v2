@@ -62,6 +62,7 @@ grading_df = load_grading_scale(GRADING_FILE)
 RESULT_IMAGE_MAX_SIZE = 500
 RESULT_IMAGE_MIN_SIZE = 160
 RESULT_IMAGE_RESERVED_HEIGHT = 500
+AUTO_PROFILE_FILENAME = "current_student.quizprofile"
 
 # ---------- App class ----------
 class QuizApp:
@@ -69,7 +70,8 @@ class QuizApp:
         self.root = root
         self.root.title("Quiz система")
         self.skin_manager = SkinManager(SKINS_DIR)
-        self.student_profile = create_profile()
+        self.profile_autosave_path = os.path.join(PROFILES_DIR, AUTO_PROFILE_FILENAME)
+        self.student_profile = self._load_autosaved_profile()
         self.active_skin = self.skin_manager.get(DEFAULT_SKIN_ID)
         self._wallpaper_label = None
         self._wallpaper_photo = None
@@ -119,6 +121,32 @@ class QuizApp:
         self._wallpaper_label = None
         self._wallpaper_photo = None
         self._refresh_wallpaper()
+
+    def _normalize_profile_skin_refs(self, profile):
+        known_ids = set(self.skin_manager.ids())
+        profile["unlocked_skins"] = [skin_id for skin_id in profile.get("unlocked_skins", []) if skin_id in known_ids]
+        if DEFAULT_SKIN_ID not in profile["unlocked_skins"]:
+            profile["unlocked_skins"].insert(0, DEFAULT_SKIN_ID)
+        if profile.get("selected_skin") not in profile["unlocked_skins"]:
+            profile["selected_skin"] = DEFAULT_SKIN_ID
+        return profile
+
+    def _load_autosaved_profile(self):
+        try:
+            if os.path.exists(self.profile_autosave_path):
+                return self._normalize_profile_skin_refs(load_profile(self.profile_autosave_path))
+        except Exception:
+            pass
+        return create_profile()
+
+    def _autosave_student_profile(self):
+        if getattr(self, "is_admin", False):
+            return
+        try:
+            os.makedirs(PROFILES_DIR, exist_ok=True)
+            save_profile(self.student_profile, self.profile_autosave_path)
+        except Exception:
+            pass
 
     def _theme_color(self, key, fallback=None):
         colors = (getattr(self, "active_skin", None) or {}).get("colors") or DEFAULT_COLORS
@@ -191,6 +219,7 @@ class QuizApp:
         self.active_skin = skin
         if persist and skin["id"] in unlocked:
             self.student_profile["selected_skin"] = skin["id"]
+            self._autosave_student_profile()
         if play_select_sound:
             play_sound(self.skin_manager.asset_path(skin, "select_sound"))
         self.root.configure(bg=self._theme_color("bg"))
@@ -706,6 +735,7 @@ class QuizApp:
             return
         self.student_profile = create_profile()
         self._set_active_skin(DEFAULT_SKIN_ID)
+        self._autosave_student_profile()
         self.create_start_screen()
 
     def import_profile(self):
@@ -722,14 +752,9 @@ class QuizApp:
         except Exception as exc:
             messagebox.showerror("Грешка", f"Профилът не може да бъде зареден.\n{exc}")
             return
-        known_ids = set(self.skin_manager.ids())
-        profile["unlocked_skins"] = [skin_id for skin_id in profile.get("unlocked_skins", []) if skin_id in known_ids]
-        if DEFAULT_SKIN_ID not in profile["unlocked_skins"]:
-            profile["unlocked_skins"].insert(0, DEFAULT_SKIN_ID)
-        if profile.get("selected_skin") not in profile["unlocked_skins"]:
-            profile["selected_skin"] = DEFAULT_SKIN_ID
-        self.student_profile = profile
+        self.student_profile = self._normalize_profile_skin_refs(profile)
         self._set_active_skin(profile.get("selected_skin", DEFAULT_SKIN_ID))
+        self._autosave_student_profile()
         messagebox.showinfo("Готово", f"Профилът е зареден.\nКлюч: {self._profile_short_key()}")
         self.create_start_screen()
 
@@ -1511,6 +1536,43 @@ class QuizApp:
         lbl.place(relx=0.5, rely=0.5, anchor="center")
         return lbl
 
+    def _add_result_action_bar(self, points, grade):
+        bar = tk.Frame(self.root, bg=self._theme_color("bg"))
+        bar.pack(pady=(52, 4))
+
+        actions = [
+            ("Начало", self.create_start_screen, self._theme_color("button_active")),
+        ]
+        if not self.is_admin:
+            actions.append(("Експорт профил", self.export_profile, self._theme_color("button")))
+        actions.extend(
+            [
+                ("Скинове", self.open_skin_window, self._theme_color("button")),
+                ("PDF отчет", lambda: self.export_pdf(points, grade), self._theme_color("button")),
+            ]
+        )
+
+        try:
+            width = self.root.winfo_width() or self.root.winfo_screenwidth()
+        except Exception:
+            width = 900
+        columns = 2 if width < 760 else len(actions)
+
+        for index, (text, command, bg) in enumerate(actions):
+            btn = tk.Button(
+                bar,
+                text=text,
+                font=("Arial", 13, "bold"),
+                width=15,
+                bg=bg,
+                fg=BTN_FG,
+                activebackground=self._theme_color("button_hover"),
+                command=command,
+            )
+            btn.grid(row=index // columns, column=index % columns, padx=4, pady=3, sticky="ew")
+        for col in range(columns):
+            bar.columnconfigure(col, weight=1)
+
     def open_link_minimized(self, url: str):
         if self.in_test:
             return
@@ -1548,6 +1610,7 @@ class QuizApp:
         if not self.is_admin:
             self.student_profile = updated_profile
             result_profile = self.student_profile
+            self._autosave_student_profile()
         selected_result_skin = getattr(self, "quiz_skin_id", None) or result_profile.get("selected_skin", DEFAULT_SKIN_ID)
         if new_skin_ids:
             self._set_active_skin(selected_result_skin, allow_locked=self.is_admin, persist=False)
@@ -1557,6 +1620,8 @@ class QuizApp:
         else:
             self._set_active_skin(selected_result_skin, allow_locked=self.is_admin, persist=False)
         result_image_box_size = self._result_image_box_size()
+        self._add_exit_button()
+        self._add_result_action_bar(points, grade)
         if grade >= 3.00:
             self._play_skin_sound("success_sound", SUCCESS_SOUND)
             photo = self._load_result_image(success=True, max_size=result_image_box_size)
@@ -1567,14 +1632,13 @@ class QuizApp:
             photo = self._load_result_image(success=False, max_size=result_image_box_size)
             if photo:
                 self._show_result_image(photo, result_image_box_size)
-        self._add_exit_button()
-        tk.Label(self.root, text="Край на теста!", font=("Arial", 28, "bold"), fg="white", bg="#1e1e2f").pack(pady=30)
-        tk.Label(self.root, text=f"Твоят резултат: {self.score}/{len(self.questions)}", font=("Arial", 24), fg="yellow", bg="#1e1e2f").pack(pady=10)
-        tk.Label(self.root, text=f"Точки: {points:.2f}", font=("Arial", 20), fg="white", bg="#1e1e2f").pack(pady=10)
+        tk.Label(self.root, text="Край на теста!", font=("Arial", 28, "bold"), fg="white", bg="#1e1e2f").pack(pady=8)
+        tk.Label(self.root, text=f"Твоят резултат: {self.score}/{len(self.questions)}", font=("Arial", 24), fg="yellow", bg="#1e1e2f").pack(pady=4)
+        tk.Label(self.root, text=f"Точки: {points:.2f}", font=("Arial", 20), fg="white", bg="#1e1e2f").pack(pady=4)
         if grade < 3.00:
             tk.Label(self.root, text="Оценка: 2.00 (под минималния праг от 30 точки)", font=("Arial", 20), fg="#ff7f7f", bg="#1e1e2f").pack(pady=5)
         else:
-            tk.Label(self.root, text=f"Оценка: {grade:.2f}", font=("Arial", 24), fg="lightgreen", bg="#1e1e2f").pack(pady=20)
+            tk.Label(self.root, text=f"Оценка: {grade:.2f}", font=("Arial", 24), fg="lightgreen", bg="#1e1e2f").pack(pady=6)
         if self.is_admin:
             demo_text = "Админ демо отключване: профилът на ученика не е променен." if demo_unlocks else "Админ тест: профилът на ученика не е променен."
             tk.Label(self.root, text=demo_text, font=("Arial", 14, "bold"),
@@ -1585,27 +1649,16 @@ class QuizApp:
             unlock_prefix = "Демо отключен скин" if self.is_admin else "Нов отключен скин"
             tk.Label(self.root, text=f"{unlock_prefix}: {skin_names}", font=("Arial", 18, "bold"),
                      fg=self._theme_color("accent"), bg="#1e1e2f",
-                     wraplength=max(600, self.root.winfo_width()-100), justify="center").pack(pady=8)
+                     wraplength=max(600, self.root.winfo_width()-100), justify="center").pack(pady=4)
         if grade < 6.00:
             tk.Label(self.root, text=(
                 "Тук можеш да намериш дигитални материали, с които да подобриш "
                 "знанията и уменията си по предмета:"),
-                font=("Arial", 16), fg="white", bg="#1e1e2f", wraplength=max(600, self.root.winfo_width()-100), justify="left").pack(pady=10)
+                font=("Arial", 16), fg="white", bg="#1e1e2f", wraplength=max(600, self.root.winfo_width()-100), justify="left").pack(pady=6)
             link = LINKS.get(self.subject, {}).get(self.category)
             if link:
                 tk.Button(self.root, text="Отвори ресурси", font=("Arial", 18), fg="blue", bg=BTN_BG,
-                          command=lambda l=link: self.open_link_minimized(l)).pack(pady=10)
-        tk.Button(self.root, text="Експорт на отчет (PDF)", font=("Arial", 18), bg=BTN_BG_ACTIVE, fg=BTN_FG,
-                  command=lambda: self.export_pdf(points, grade)).pack(pady=10)
-        result_tools = tk.Frame(self.root, bg="#1e1e2f")
-        result_tools.pack(pady=4)
-        if not self.is_admin:
-            tk.Button(result_tools, text="Експорт профил", font=("Arial", 16), bg=BTN_BG, fg=BTN_FG,
-                      activebackground=BTN_BG_ACTIVE, command=self.export_profile).pack(side="left", padx=6)
-        tk.Button(result_tools, text="Скинове", font=("Arial", 16), bg=BTN_BG, fg=BTN_FG,
-                  activebackground=BTN_BG_ACTIVE, command=self.open_skin_window).pack(side="left", padx=6)
-        tk.Button(self.root, text="Начало", font=("Arial", 20), bg=BTN_BG, fg=BTN_FG,
-                  command=self.create_start_screen).pack(pady=30)
+                          command=lambda l=link: self.open_link_minimized(l)).pack(pady=6)
         self.create_footer()
         self._apply_theme()
         self._apply_zoom()
